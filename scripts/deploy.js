@@ -1,5 +1,6 @@
 const { getSelectors, FacetCutAction } = require('./libraries/diamond.js')
-const { ethers } = require('hardhat')
+const { ethers, run } = require('hardhat')
+
 async function deployDiamond() {
   const accounts = await ethers.getSigners()
   const contractOwner = accounts[0]
@@ -12,16 +13,11 @@ async function deployDiamond() {
 
   // deploy Diamond
   const Diamond = await ethers.getContractFactory('Diamond')
-  const diamond = await Diamond.deploy(
-    contractOwner.address,
-    diamondCutFacet.address,
-  )
+  const diamond = await Diamond.deploy(contractOwner.address, diamondCutFacet.address, 10000000, "Alexia chukwuma", "Alc", 18)
   await diamond.deployed()
   console.log('Diamond deployed:', diamond.address)
 
   // deploy DiamondInit
-  // DiamondInit provides a function that is called when the diamond is upgraded to initialize state variables
-  // Read about how the diamondCut function works here: https://eips.ethereum.org/EIPS/eip-2535#addingreplacingremoving-functions
   const DiamondInit = await ethers.getContractFactory('DiamondInit')
   const diamondInit = await DiamondInit.deploy()
   await diamondInit.deployed()
@@ -30,7 +26,7 @@ async function deployDiamond() {
   // deploy facets
   console.log('')
   console.log('Deploying facets')
-  const FacetNames = ['DiamondLoupeFacet', 'OwnershipFacet']
+  const FacetNames = ['DiamondLoupeFacet', 'OwnershipFacet', 'Erc20Faucet']
   const cut = []
   for (const FacetName of FacetNames) {
     const Facet = await ethers.getContractFactory(FacetName)
@@ -59,6 +55,24 @@ async function deployDiamond() {
     throw Error(`Diamond upgrade failed: ${tx.hash}`)
   }
   console.log('Completed diamond cut')
+
+  // Verify the contract
+  try {
+    await run("verify:verify", {
+      address: diamond.address,
+      constructorArguments: [
+        contractOwner.address,
+        diamondCutFacet.address,
+        10000000,
+        "Alexia chukwuma",
+        "Alc",
+        18
+      ],
+    });
+  } catch (error) {
+    console.error("Verification error:", error);
+  }
+
   return diamond.address
 }
 

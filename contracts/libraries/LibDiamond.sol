@@ -21,6 +21,23 @@ library LibDiamond {
     error NonEmptyCalldata();
     error EmptyCalldata();
     error InitCallFailed();
+
+    error ERC20InvalidSender(address sender);
+    error ERC20InsufficientBalance(address from, uint256 fromBalance, uint256 value);
+    error ERC20InvalidReceiver(address sende);
+    error ERC20InvalidApprover(address sender);
+    error ERC20InvalidSpender(address spender);
+    error ERC20InsufficientAllowance(address spender, uint256 currentAllowance, uint256 value);
+
+       
+    event Transfer(address indexed from, address indexed to, uint256 value);
+
+   
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+
+    
+    
+    
     bytes32 constant DIAMOND_STORAGE_POSITION =
         keccak256("diamond.standard.diamond.storage");
 
@@ -47,6 +64,20 @@ library LibDiamond {
         mapping(bytes4 => bool) supportedInterfaces;
         // owner of the contract
         address contractOwner;
+
+
+        mapping(address => uint256) balances;
+
+        mapping(address => mapping(address => uint256)) allowances;
+
+        uint256 totalsupply;
+
+        string name;
+
+        string symbol;
+
+
+        uint256 decimal;
     }
 
     function diamondStorage()

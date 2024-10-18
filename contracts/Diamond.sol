@@ -1,19 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+
 /******************************************************************************\
 * Author: Nick Mudge <nick@perfectabstractions.com> (https://twitter.com/mudgen)
 * EIP-2535 Diamonds: https://eips.ethereum.org/EIPS/eip-2535
 *
 * Implementation of a diamond.
-/******************************************************************************/
+\******************************************************************************/
 
 import {LibDiamond} from "./libraries/LibDiamond.sol";
 import {IDiamondCut} from "./interfaces/IDiamondCut.sol";
 
+
 contract Diamond {
-    constructor(address _contractOwner, address _diamondCutFacet) payable {
+
+    
+    constructor(address _contractOwner, address _diamondCutFacet, uint256 totalSupply , string memory name , string memory symbol, uint decimal ) payable {
         LibDiamond.setContractOwner(_contractOwner);
+        LibDiamond.DiamondStorage storage ds = LibDiamond.diamondStorage();
 
         // Add the diamondCut external function from the diamondCutFacet
         IDiamondCut.FacetCut[] memory cut = new IDiamondCut.FacetCut[](1);
@@ -25,6 +30,11 @@ contract Diamond {
             functionSelectors: functionSelectors
         });
         LibDiamond.diamondCut(cut, address(0), "");
+
+        ds.name = name;
+        ds.totalsupply = totalSupply;
+        ds.symbol = symbol;
+        ds.decimal = decimal;
     }
 
     // Find facet for function that is called and execute the
