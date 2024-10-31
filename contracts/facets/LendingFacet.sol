@@ -10,102 +10,119 @@ interface IERC721 {
 }
 
 contract LendingFacet {
-    using SafeERC20 for IERC20;
-    
-    struct Loan {
-        uint256 loanId;
-        address borrower;
-        address nftContract;
-        uint256 tokenId;
-        uint256 amount;
-        uint256 interest;
-        uint256 duration;
-        uint256 startTime;
-        bool active;
-        bool repaid;
-    }
+    using LibDiamond for LibDiamond.DiamondStorage;
 
-    mapping(uint256 => Loan) public loans;
-    uint256 public nextLoanId;
+    event LoanCreated(
+        address indexed borrower,
+        address indexed lender,
+        uint256 tokenId,
+        uint256 loanAmount,
+        uint256 interest,
+        uint256 duration
+    );
     
-    event LoanCreated(uint256 indexed loanId, address indexed borrower, uint256 amount);
-    event LoanRepaid(uint256 indexed loanId);
-    event NFTLiquidated(uint256 indexed loanId);
+    event LoanRepaid(
+        address indexed borrower,
+        address indexed lender,
+        uint256 tokenId,
+        uint256 amountRepaid
+    );
 
     function createLoan(
-        address _nftContract,
-        uint256 _tokenId,
-        uint256 _amount,
-        uint256 _duration
-    ) external {
-        require(_amount > 0, "Amount must be greater than 0");
-        require(_duration > 0, "Duration must be greater than 0");
+        address nftContract,
+        uint256 tokenId,
+        uint256 loanAmount,
+        uint256 interest,
+        uint256 duration
+    ) external payable {
+        LibDiamondStorage.DiamondStorage storage ds = LibDiamondStorage.diamondStorage();
         
-        IERC721(_nftContract).transferFrom(msg.sender, address(this), _tokenId);
+        require(msg.value == loanAmount, "Incorrect loan amount sent");
+        require(duration > 0, "Duration must be greater than 0");
+        require(interest <= 10000, "Interest rate too high"); // Max 100%
         
-        uint256 interest = calculateInterest(_amount, _duration);
+        // Transfer NFT to contract
+        IERC721(nftContract).transferFrom(msg.sender, address(this), tokenId);
         
-        loans[nextLoanId] = Loan({
-            loanId: nextLoanId,
-            borrower: msg.sender,
-            nftContract: _nftContract,
-            tokenId: _tokenId,
-            amount: _amount,
+        // Create loan
+        ds.loans[msg.sender][tokenId] = LibDiamondStorage.LoanDetails({
+            loanAmount: loanAmount,
             interest: interest,
-            duration: _duration,
             startTime: block.timestamp,
-            active: true,
-            repaid: false
+            duration: duration,
+            lender: msg.sender,
+            isActive: true,
+            nftContract: nftContract
         });
         
-        IERC20(LibDiamond.diamondStorage().lendingToken).safeTransfer(msg.sender, _amount);
+        ds.totalLoaned[msg.sender] += loanAmount;
         
-        emit LoanCreated(nextLoanId, msg.sender, _amount);
-        nextLoanId++;
-    }
-
-    function repayLoan(uint256 _loanId) external {
-        Loan storage loan = loans[_loanId];
-        require(loan.active, "Loan is not active");
-        require(!loan.repaid, "Loan is already repaid");
-        require(msg.sender == loan.borrower, "Not the borrower");
-        
-        uint256 totalAmount = loan.amount + loan.interest;
-        IERC20(LibDiamond.diamondStorage().lendingToken).safeTransferFrom(
+        emit LoanCreated(
             msg.sender,
-            address(this),
-            totalAmount
+            msg.sender,
+            tokenId,
+            loanAmount,
+            interest,
+            duration
         );
+    }
+    
+    function repayLoan(address nftContract, uint256 tokenId) external payable {
+        LibDiamondStorage.DiamondStorage storage ds = LibDiamondStorage.diamondStorage();
+        LibDiamondStorage.LoanDetails storage loan = ds.loans[msg.sender][tokenId];
         
-        IERC721(loan.nftContract).transferFrom(address(this), msg.sender, loan.tokenId);
+        require(loan.isActive, "Loan not active");
         
-        loan.active = false;
-        loan.repaid = true;
+        uint256 interest = calculateInterest(loan);
+        uint256 totalRepayment = loan.loanAmount + interest;
+        require(msg.value >= totalRepayment, "Insufficient repayment amount");
         
-        emit LoanRepaid(_loanId);
+        // Process repayment
+        loan.isActive = false;
+        ds.collectedInterest[loan.lender] += interest;
+        
+        // Return NFT
+        IERC721(nftContract).transferFrom(address(this), msg.sender, tokenId);
+        
+        // Send payment to lender
+        payable(loan.lender).transfer(totalRepayment);
+        
+        emit LoanRepaid(
+            msg.sender,
+            loan.lender,
+            tokenId,
+            totalRepayment
+        );
+    }
+    
+    function calculateInterest(LibDiamond.LoanDetails storage loan) internal view returns (uint256) {
+        uint256 timeElapsed = block.timestamp - loan.startTime;
+        uint256 yearInSeconds = 365 days;
+        
+        return (loan.loanAmount * loan.interest * timeElapsed) / (10000 * yearInSeconds);
     }
 
-    function liquidateLoan(uint256 _loanId) external {
-        Loan storage loan = loans[_loanId];
-        require(loan.active, "Loan is not active");
-        require(!loan.repaid, "Loan is already repaid");
-        require(
-            block.timestamp > loan.startTime + loan.duration,
-            "Loan duration not expired"
-        );
+    // View functions
+    function getLoanDetails(address borrower, uint256 tokenId) external view returns (
+        uint256 loanAmount,
+        uint256 interest,
+        uint256 startTime,
+        uint256 duration,
+        address lender,
+        bool isActive,
+        address nftContract
+    ) {
+        LibDiamondStorage.DiamondStorage storage ds = LibDiamondStorage.diamondStorage();
+        LibDiamondStorage.LoanDetails storage loan = ds.loans[borrower][tokenId];
         
-        loan.active = false;
-        IERC721(loan.nftContract).transferFrom(
-            address(this),
-            LibDiamond.diamondStorage().treasury,
-            loan.tokenId
+        return (
+            loan.loanAmount,
+            loan.interest,
+            loan.startTime,
+            loan.duration,
+            loan.lender,
+            loan.isActive,
+            loan.nftContract
         );
-        
-        emit NFTLiquidated(_loanId);
-    }
-
-    function calculateInterest(uint256 _amount, uint256 _duration) internal pure returns (uint256) {
-        // 10% APR
-        return (_amount * _duration * 10) / (365 days * 100);
     }
 }
